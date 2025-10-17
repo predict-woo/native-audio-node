@@ -109,7 +109,7 @@ export class AudioTee {
         return
       }
 
-      const binaryPath = join(__dirname, '..', 'bin', 'audiotee')
+      const binaryPath = this.options.binaryPath ?? join(__dirname, '..', 'bin', 'audiotee')
       const args = this.buildArguments()
 
       this.process = spawn(binaryPath, args)

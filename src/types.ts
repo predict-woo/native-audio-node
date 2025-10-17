@@ -4,6 +4,7 @@ export interface AudioTeeOptions {
   mute?: boolean
   includeProcesses?: number[]
   excludeProcesses?: number[]
+  binaryPath?: string
 }
 
 export interface AudioChunk {
