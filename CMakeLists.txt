@@ -1,9 +1,9 @@
 cmake_minimum_required(VERSION 3.15)
-project(audiotee)
+project(coreaudio)
 
 # macOS-only project
 if(NOT APPLE)
-    message(FATAL_ERROR "AudioTee only supports macOS")
+    message(FATAL_ERROR "coreaudio-node only supports macOS")
 endif()
 
 # Set C++ standard
@@ -18,7 +18,7 @@ set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "Build architectures")
 
 # Swift source files
 set(SWIFT_SOURCES
-    ${CMAKE_SOURCE_DIR}/native/swift/AudioTeeBridge.swift
+    ${CMAKE_SOURCE_DIR}/native/swift/CoreAudioBridge.swift
     ${CMAKE_SOURCE_DIR}/native/swift/NativeAudioRecorder.swift
     ${CMAKE_SOURCE_DIR}/native/swift/AudioTapManager.swift
     ${CMAKE_SOURCE_DIR}/native/swift/AudioBuffer.swift
@@ -29,6 +29,8 @@ set(SWIFT_SOURCES
     ${CMAKE_SOURCE_DIR}/native/swift/TapMuteBehavior.swift
     ${CMAKE_SOURCE_DIR}/native/swift/AudioTeeErrors.swift
     ${CMAKE_SOURCE_DIR}/native/swift/AudioPermission.swift
+    ${CMAKE_SOURCE_DIR}/native/swift/AudioDeviceManager.swift
+    ${CMAKE_SOURCE_DIR}/native/swift/MicrophoneCapture.swift
     ${CMAKE_SOURCE_DIR}/native/swift/Utils.swift
 )
 
@@ -38,44 +40,44 @@ file(MAKE_DIRECTORY ${SWIFT_LIB_DIR})
 
 # Build Swift static library using custom command
 add_custom_command(
-    OUTPUT ${SWIFT_LIB_DIR}/libaudiotee_swift.a
+    OUTPUT ${SWIFT_LIB_DIR}/libcoreaudio_swift.a
     COMMAND swiftc
         -emit-library
         -static
-        -module-name AudioTeeSwift
+        -module-name CoreAudioSwift
         -parse-as-library
         -O
         -target arm64-apple-macosx14.2
-        -o ${SWIFT_LIB_DIR}/libaudiotee_swift_arm64.a
+        -o ${SWIFT_LIB_DIR}/libcoreaudio_swift_arm64.a
         ${SWIFT_SOURCES}
     COMMAND swiftc
         -emit-library
         -static
-        -module-name AudioTeeSwift
+        -module-name CoreAudioSwift
         -parse-as-library
         -O
         -target x86_64-apple-macosx14.2
-        -o ${SWIFT_LIB_DIR}/libaudiotee_swift_x86_64.a
+        -o ${SWIFT_LIB_DIR}/libcoreaudio_swift_x86_64.a
         ${SWIFT_SOURCES}
     COMMAND lipo
         -create
-        ${SWIFT_LIB_DIR}/libaudiotee_swift_arm64.a
-        ${SWIFT_LIB_DIR}/libaudiotee_swift_x86_64.a
-        -output ${SWIFT_LIB_DIR}/libaudiotee_swift.a
+        ${SWIFT_LIB_DIR}/libcoreaudio_swift_arm64.a
+        ${SWIFT_LIB_DIR}/libcoreaudio_swift_x86_64.a
+        -output ${SWIFT_LIB_DIR}/libcoreaudio_swift.a
     DEPENDS ${SWIFT_SOURCES}
     COMMENT "Building Swift static library (universal binary)"
     VERBATIM
 )
 
 # Create a custom target for the Swift library
-add_custom_target(swift_lib DEPENDS ${SWIFT_LIB_DIR}/libaudiotee_swift.a)
+add_custom_target(swift_lib DEPENDS ${SWIFT_LIB_DIR}/libcoreaudio_swift.a)
 
 # Required for cmake-js
 include_directories(${CMAKE_JS_INC})
 
 # C++ N-API addon
 add_library(${PROJECT_NAME} SHARED
-    native/cpp/audiotee_napi.cpp
+    native/cpp/coreaudio_napi.cpp
 )
 
 # Ensure Swift is built first
@@ -119,7 +121,7 @@ set(SWIFT_LIB_PATH "${SWIFT_TOOLCHAIN_DIR}/lib/swift/macosx")
 # Link with our Swift library and required frameworks
 target_link_libraries(${PROJECT_NAME}
     ${CMAKE_JS_LIB}
-    ${SWIFT_LIB_DIR}/libaudiotee_swift.a
+    ${SWIFT_LIB_DIR}/libcoreaudio_swift.a
     "-L${SWIFT_LIB_PATH}"
     "-lswiftCore"
     "-lswiftFoundation"

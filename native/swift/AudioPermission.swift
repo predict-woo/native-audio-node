@@ -1,5 +1,6 @@
 import Foundation
 import AppKit
+import AVFoundation
 
 // MARK: - Permission Status
 
@@ -87,15 +88,15 @@ private class TCCFramework {
     }
 }
 
-// MARK: - C-Compatible API
+// MARK: - C-Compatible API (System Audio Permission - TCC Private API)
 
-@_cdecl("audiotee_permission_status")
-public func audiotee_permission_status() -> Int32 {
+@_cdecl("coreaudio_system_audio_permission_status")
+public func coreaudio_system_audio_permission_status() -> Int32 {
     return TCCFramework.shared.checkStatus().rawValue
 }
 
-@_cdecl("audiotee_permission_request")
-public func audiotee_permission_request(
+@_cdecl("coreaudio_system_audio_permission_request")
+public func coreaudio_system_audio_permission_request(
     callback: @escaping @convention(c) (Bool, UnsafeMutableRawPointer?) -> Void,
     context: UnsafeMutableRawPointer?
 ) {
@@ -104,13 +105,41 @@ public func audiotee_permission_request(
     }
 }
 
-@_cdecl("audiotee_permission_available")
-public func audiotee_permission_available() -> Bool {
+@_cdecl("coreaudio_system_audio_permission_available")
+public func coreaudio_system_audio_permission_available() -> Bool {
     return TCCFramework.shared.isAvailable
 }
 
-@_cdecl("audiotee_open_system_settings")
-public func audiotee_open_system_settings() -> Bool {
+@_cdecl("coreaudio_open_system_settings")
+public func coreaudio_open_system_settings() -> Bool {
     let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!
     return NSWorkspace.shared.open(url)
+}
+
+// MARK: - Microphone Permission (AVFoundation Public API)
+
+@_cdecl("coreaudio_mic_permission_status")
+public func coreaudio_mic_permission_status() -> Int32 {
+    switch AVCaptureDevice.authorizationStatus(for: .audio) {
+    case .notDetermined:
+        return 0  // unknown
+    case .denied, .restricted:
+        return 1  // denied
+    case .authorized:
+        return 2  // authorized
+    @unknown default:
+        return 0
+    }
+}
+
+@_cdecl("coreaudio_mic_permission_request")
+public func coreaudio_mic_permission_request(
+    callback: @escaping @convention(c) (Bool, UnsafeMutableRawPointer?) -> Void,
+    context: UnsafeMutableRawPointer?
+) {
+    AVCaptureDevice.requestAccess(for: .audio) { granted in
+        DispatchQueue.main.async {
+            callback(granted, context)
+        }
+    }
 }

@@ -15,9 +15,9 @@ struct NativeAudioMetadata {
 // MARK: - Native Output Handler
 
 class NativeAudioOutputHandler {
-    weak var session: AudioTeeSession?
+    weak var session: AudioRecorderSession?
 
-    init(session: AudioTeeSession) {
+    init(session: AudioRecorderSession) {
         self.session = session
     }
 

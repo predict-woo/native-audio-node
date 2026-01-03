@@ -6,7 +6,7 @@ import AudioToolbox
 // MARK: - Global State Management
 
 /// Opaque handle type for the audio capture session
-public typealias AudioTeeHandle = UnsafeMutableRawPointer
+public typealias AudioRecorderHandle = UnsafeMutableRawPointer
 
 /// Callback type for receiving audio data
 public typealias AudioDataCallback = @convention(c) (
@@ -34,9 +34,19 @@ public typealias AudioMetadataCallback = @convention(c) (
 
 // MARK: - Session State
 
-class AudioTeeSession {
+/// Audio source type
+enum AudioSource {
+    case systemAudio
+    case microphone(deviceUID: String?)
+}
+
+/// Unified session for both system audio and microphone recording
+class AudioRecorderSession {
+    var source: AudioSource?
     var tapManager: AudioTapManager?
     var recorder: NativeAudioRecorder?
+    var micCaptureManager: MicrophoneCaptureManager?
+    var micRecorder: MicrophoneRecorder?
     var isRunning: Bool = false
 
     let dataCallback: AudioDataCallback?
@@ -90,16 +100,16 @@ class AudioTeeSession {
 
 // MARK: - C-Compatible API
 
-/// Creates a new AudioTee session
-/// Returns an opaque handle that must be freed with audiotee_destroy
-@_cdecl("audiotee_create")
-public func audiotee_create(
+/// Creates a new audio recorder session
+/// Returns an opaque handle that must be freed with coreaudio_destroy
+@_cdecl("coreaudio_create")
+public func coreaudio_create(
     dataCallback: AudioDataCallback?,
     eventCallback: AudioEventCallback?,
     metadataCallback: AudioMetadataCallback?,
     userContext: UnsafeMutableRawPointer?
-) -> AudioTeeHandle? {
-    let session = AudioTeeSession(
+) -> AudioRecorderHandle? {
+    let session = AudioRecorderSession(
         dataCallback: dataCallback,
         eventCallback: eventCallback,
         metadataCallback: metadataCallback,
@@ -109,10 +119,10 @@ public func audiotee_create(
     return Unmanaged.passRetained(session).toOpaque()
 }
 
-/// Configuration options passed as a struct
-@_cdecl("audiotee_start")
-public func audiotee_start(
-    handle: AudioTeeHandle,
+/// Start system audio capture
+@_cdecl("coreaudio_start_system_audio")
+public func coreaudio_start_system_audio(
+    handle: AudioRecorderHandle,
     sampleRate: Double,           // 0 for native rate
     chunkDurationMs: Double,      // chunk duration in milliseconds
     mute: Bool,
@@ -122,7 +132,7 @@ public func audiotee_start(
     excludeProcesses: UnsafePointer<Int32>?,
     excludeProcessCount: Int32
 ) -> Int32 {
-    guard let session = Unmanaged<AudioTeeSession>.fromOpaque(handle).takeUnretainedValue() as AudioTeeSession? else {
+    guard let session = Unmanaged<AudioRecorderSession>.fromOpaque(handle).takeUnretainedValue() as AudioRecorderSession? else {
         return -1
     }
 
@@ -177,6 +187,7 @@ public func audiotee_start(
         return -4
     }
 
+    session.source = .systemAudio
     session.tapManager = tapManager
 
     // Create native output handler that calls our callbacks
@@ -213,10 +224,89 @@ public func audiotee_start(
     return 0
 }
 
+/// Start microphone capture
+@_cdecl("coreaudio_start_microphone")
+public func coreaudio_start_microphone(
+    handle: AudioRecorderHandle,
+    sampleRate: Double,
+    chunkDurationMs: Double,
+    isMono: Bool,
+    deviceUID: UnsafePointer<CChar>?,  // NULL for default device
+    gain: Double                        // 0.0 to 1.0
+) -> Int32 {
+    guard let session = Unmanaged<AudioRecorderSession>.fromOpaque(handle).takeUnretainedValue() as AudioRecorderSession? else {
+        return -1
+    }
+
+    if session.isRunning {
+        return -2 // Already running
+    }
+
+    // Convert device UID if provided
+    let deviceUIDString: String? = deviceUID != nil ? String(cString: deviceUID!) : nil
+
+    session.source = .microphone(deviceUID: deviceUIDString)
+
+    // Create microphone capture manager (for gain and device discovery)
+    let micCaptureManager = MicrophoneCaptureManager()
+    micCaptureManager.setGain(gain)
+    session.micCaptureManager = micCaptureManager
+
+    // Create native output handler that calls our callbacks
+    let outputHandler = NativeAudioOutputHandler(session: session)
+
+    // Convert chunk duration from ms to seconds
+    let chunkDurationSec = chunkDurationMs / 1000.0
+
+    // Create microphone recorder using AVAudioEngine
+    let targetSampleRate: Double? = sampleRate > 0 ? sampleRate : nil
+    let micRecorder = MicrophoneRecorder(
+        outputHandler: outputHandler,
+        convertToSampleRate: targetSampleRate,
+        chunkDuration: chunkDurationSec,
+        gain: micCaptureManager.getGain(),
+        deviceUID: deviceUIDString
+    )
+
+    session.micRecorder = micRecorder
+    session.isRunning = true
+
+    // Start recording - AVCaptureSession handles the audio capture
+    do {
+        try micRecorder.startRecording()
+    } catch MicrophoneError.deviceNotFound(let uid) {
+        session.isRunning = false
+        session.emitEvent(2, message: "Microphone device not found: \(uid)")
+        return -3
+    } catch MicrophoneError.permissionDenied {
+        session.isRunning = false
+        session.emitEvent(2, message: "Microphone permission denied")
+        return -4
+    } catch MicrophoneError.noDefaultInputDevice {
+        session.isRunning = false
+        session.emitEvent(2, message: "No default input device available")
+        return -5
+    } catch MicrophoneError.sessionConfigurationFailed(let error) {
+        session.isRunning = false
+        session.emitEvent(2, message: "Failed to configure capture session: \(error.localizedDescription)")
+        return -6
+    } catch MicrophoneError.captureSessionError(let message) {
+        session.isRunning = false
+        session.emitEvent(2, message: "Capture session error: \(message)")
+        return -7
+    } catch {
+        session.isRunning = false
+        session.emitEvent(2, message: "Failed to start microphone: \(error)")
+        return -8
+    }
+
+    return 0
+}
+
 /// Stops the audio capture session
-@_cdecl("audiotee_stop")
-public func audiotee_stop(handle: AudioTeeHandle) -> Int32 {
-    guard let session = Unmanaged<AudioTeeSession>.fromOpaque(handle).takeUnretainedValue() as AudioTeeSession? else {
+@_cdecl("coreaudio_stop")
+public func coreaudio_stop(handle: AudioRecorderHandle) -> Int32 {
+    guard let session = Unmanaged<AudioRecorderSession>.fromOpaque(handle).takeUnretainedValue() as AudioRecorderSession? else {
         return -1
     }
 
@@ -225,27 +315,36 @@ public func audiotee_stop(handle: AudioTeeHandle) -> Int32 {
     }
 
     session.isRunning = false
+
+    // Stop system audio recorder if running
     session.recorder?.stopRecording()
     session.recorder = nil
     session.tapManager = nil
 
+    // Stop microphone recorder if running
+    session.micRecorder?.stopRecording()
+    session.micRecorder = nil
+    session.micCaptureManager = nil
+
+    session.source = nil
+
     return 0
 }
 
-/// Destroys the AudioTee session and frees resources
-@_cdecl("audiotee_destroy")
-public func audiotee_destroy(handle: AudioTeeHandle) {
+/// Destroys the session and frees resources
+@_cdecl("coreaudio_destroy")
+public func coreaudio_destroy(handle: AudioRecorderHandle) {
     // Stop if running
-    _ = audiotee_stop(handle: handle)
+    _ = coreaudio_stop(handle: handle)
 
     // Release the session
-    Unmanaged<AudioTeeSession>.fromOpaque(handle).release()
+    Unmanaged<AudioRecorderSession>.fromOpaque(handle).release()
 }
 
 /// Returns whether the session is currently recording
-@_cdecl("audiotee_is_running")
-public func audiotee_is_running(handle: AudioTeeHandle) -> Bool {
-    guard let session = Unmanaged<AudioTeeSession>.fromOpaque(handle).takeUnretainedValue() as AudioTeeSession? else {
+@_cdecl("coreaudio_is_running")
+public func coreaudio_is_running(handle: AudioRecorderHandle) -> Bool {
+    guard let session = Unmanaged<AudioRecorderSession>.fromOpaque(handle).takeUnretainedValue() as AudioRecorderSession? else {
         return false
     }
     return session.isRunning

@@ -1,6 +1,7 @@
 {
-  "name": "audiotee",
-  "version": "0.0.8",
+  "name": "coreaudio-node",
+  "version": "0.1.0",
+  "description": "Native macOS audio capture for Node.js - system audio and microphone recording",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

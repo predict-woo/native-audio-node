@@ -8,9 +8,14 @@ const require = createRequire(import.meta.url)
 export type PermissionStatus = 'unknown' | 'denied' | 'authorized'
 
 interface NativeAddon {
-  getPermissionStatus(): PermissionStatus
-  isPermissionAvailable(): boolean
-  requestPermission(callback: (granted: boolean) => void): void
+  // System audio permission (TCC private API)
+  getSystemAudioPermissionStatus(): PermissionStatus
+  isSystemAudioPermissionAvailable(): boolean
+  requestSystemAudioPermission(callback: (granted: boolean) => void): void
+  // Microphone permission (AVFoundation public API)
+  getMicPermissionStatus(): PermissionStatus
+  requestMicPermission(callback: (granted: boolean) => void): void
+  // Shared
   openSystemSettings(): boolean
 }
 
@@ -20,8 +25,8 @@ function loadAddon(): NativeAddon {
   if (addon) return addon
 
   const paths = [
-    path.join(__dirname, '..', 'build', 'Release', 'audiotee.node'),
-    path.join(__dirname, '..', '..', 'build', 'Release', 'audiotee.node'),
+    path.join(__dirname, '..', 'build', 'Release', 'coreaudio.node'),
+    path.join(__dirname, '..', '..', 'build', 'Release', 'coreaudio.node'),
   ]
 
   for (const addonPath of paths) {
@@ -33,37 +38,73 @@ function loadAddon(): NativeAddon {
     }
   }
 
-  throw new Error('Failed to load native AudioTee addon')
+  throw new Error('Failed to load native coreaudio addon')
 }
+
+// ============================================================================
+// System Audio Permission (uses TCC private API)
+// ============================================================================
 
 /**
  * Check the current system audio recording permission status.
+ * Uses macOS TCC private API - may not be available on all systems.
  * @returns 'authorized' | 'denied' | 'unknown'
  */
-export function getPermissionStatus(): PermissionStatus {
-  return loadAddon().getPermissionStatus()
+export function getSystemAudioPermissionStatus(): PermissionStatus {
+  return loadAddon().getSystemAudioPermissionStatus()
 }
 
 /**
  * Check if the TCC permission API is available.
  * This uses private macOS APIs that may not be available on all systems.
  */
-export function isPermissionAvailable(): boolean {
-  return loadAddon().isPermissionAvailable()
+export function isSystemAudioPermissionAvailable(): boolean {
+  return loadAddon().isSystemAudioPermissionAvailable()
 }
 
 /**
  * Request system audio recording permission.
- * This will show the macOS permission dialog if the permission hasn't been determined yet.
- * @returns Promise that resolves to true if permission was granted, false otherwise
+ * Note: This may not show a dialog - macOS doesn't have a standard permission
+ * dialog for system audio. Users may need to manually add the app in System Settings.
+ * @returns Promise that resolves to true if permission was granted
  */
-export function requestPermission(): Promise<boolean> {
+export function requestSystemAudioPermission(): Promise<boolean> {
   return new Promise((resolve) => {
-    loadAddon().requestPermission((granted) => {
+    loadAddon().requestSystemAudioPermission((granted) => {
       resolve(granted)
     })
   })
 }
+
+// ============================================================================
+// Microphone Permission (uses AVFoundation public API)
+// ============================================================================
+
+/**
+ * Check the current microphone recording permission status.
+ * Uses the standard AVFoundation API.
+ * @returns 'authorized' | 'denied' | 'unknown'
+ */
+export function getMicrophonePermissionStatus(): PermissionStatus {
+  return loadAddon().getMicPermissionStatus()
+}
+
+/**
+ * Request microphone recording permission.
+ * This will show the standard macOS permission dialog if permission hasn't been determined.
+ * @returns Promise that resolves to true if permission was granted
+ */
+export function requestMicrophonePermission(): Promise<boolean> {
+  return new Promise((resolve) => {
+    loadAddon().requestMicPermission((granted) => {
+      resolve(granted)
+    })
+  })
+}
+
+// ============================================================================
+// Shared
+// ============================================================================
 
 /**
  * Open System Settings to the Screen & System Audio Recording pane.
@@ -75,38 +116,8 @@ export function openSystemSettings(): boolean {
 }
 
 /**
- * Ensure system audio recording permission is granted.
- * If not authorized, will attempt to request permission or open System Settings.
- * @throws Error if permission is denied and user needs to grant it manually
+ * Error thrown when permission is required but not granted.
  */
-export async function ensurePermission(): Promise<void> {
-  if (!isPermissionAvailable()) {
-    // TCC API not available, can't check permission
-    // Recording may work or fail silently
-    return
-  }
-
-  const status = getPermissionStatus()
-
-  if (status === 'authorized') {
-    return
-  }
-
-  if (status === 'unknown') {
-    // Try to request permission
-    const granted = await requestPermission()
-    if (granted) {
-      return
-    }
-  }
-
-  // Permission denied or request failed
-  throw new PermissionError(
-    'System audio recording permission is required. Please grant permission in System Settings.',
-    getPermissionStatus()
-  )
-}
-
 export class PermissionError extends Error {
   public readonly status: PermissionStatus
 
@@ -115,4 +126,64 @@ export class PermissionError extends Error {
     this.name = 'PermissionError'
     this.status = status
   }
+}
+
+/**
+ * Ensure system audio recording permission is granted.
+ * If not authorized, will attempt to request permission or throw an error.
+ * @throws PermissionError if permission is denied
+ */
+export async function ensureSystemAudioPermission(): Promise<void> {
+  if (!isSystemAudioPermissionAvailable()) {
+    // TCC API not available, can't check permission
+    // Recording may work or fail silently
+    return
+  }
+
+  const status = getSystemAudioPermissionStatus()
+
+  if (status === 'authorized') {
+    return
+  }
+
+  if (status === 'unknown') {
+    // Try to request permission (may not show dialog)
+    const granted = await requestSystemAudioPermission()
+    if (granted) {
+      return
+    }
+  }
+
+  // Permission denied or request failed
+  throw new PermissionError(
+    'System audio recording permission is required. Please grant permission in System Settings.',
+    getSystemAudioPermissionStatus()
+  )
+}
+
+/**
+ * Ensure microphone recording permission is granted.
+ * If not authorized, will show the permission dialog or throw an error.
+ * @throws PermissionError if permission is denied
+ */
+export async function ensureMicrophonePermission(): Promise<void> {
+  const status = getMicrophonePermissionStatus()
+
+  if (status === 'authorized') {
+    return
+  }
+
+  if (status === 'unknown') {
+    // Request permission - this will show the dialog
+    const granted = await requestMicrophonePermission()
+    if (granted) {
+      return
+    }
+  }
+
+  // Permission denied or request failed
+  throw new PermissionError(
+    'Microphone recording permission is required. Please grant permission in System Settings.',
+    getMicrophonePermissionStatus()
+  )
 }

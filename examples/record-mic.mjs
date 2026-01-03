@@ -1,17 +1,18 @@
 #!/usr/bin/env node
 
-import { SystemAudioRecorder, getSystemAudioPermissionStatus, isSystemAudioPermissionAvailable, openSystemSettings } from '../dist/index.js'
+import { MicrophoneRecorder, listAudioDevices, getMicrophonePermissionStatus, requestMicrophonePermission, openSystemSettings } from '../dist/index.js'
 import { writeFileSync } from 'fs'
 import { parseArgs } from 'util'
 
 // Parse command line arguments
 const { values } = parseArgs({
   options: {
-    output: { type: 'string', short: 'o', default: 'recording.wav' },
-    duration: { type: 'string', short: 'd', default: '10' },
+    output: { type: 'string', short: 'o', default: 'mic-recording.wav' },
+    duration: { type: 'string', short: 'd', default: '5' },
     'sample-rate': { type: 'string', short: 's' },
-    mute: { type: 'boolean', short: 'm', default: false },
-    stereo: { type: 'boolean', default: false },
+    'device-id': { type: 'string', short: 'i' },
+    gain: { type: 'string', short: 'g', default: '1.0' },
+    'list-devices': { type: 'boolean', short: 'l', default: false },
     help: { type: 'boolean', short: 'h', default: false },
   },
   allowPositionals: true,
@@ -19,47 +20,65 @@ const { values } = parseArgs({
 
 if (values.help) {
   console.log(`
-record-wav - Record system audio to WAV file
+record-mic - Record microphone audio to WAV file
 
-Usage: node record-wav.mjs [options]
+Usage: node record-mic.mjs [options]
 
 Options:
-  -o, --output <file>      Output WAV file (default: recording.wav)
-  -d, --duration <seconds> Recording duration in seconds (default: 10)
+  -o, --output <file>      Output WAV file (default: mic-recording.wav)
+  -d, --duration <seconds> Recording duration in seconds (default: 5)
   -s, --sample-rate <rate> Target sample rate (8000, 16000, 44100, 48000)
-  -m, --mute               Mute audio while recording
-      --stereo             Record in stereo (default: mono)
+  -i, --device-id <id>     Device UID to record from (default: system default)
+  -g, --gain <value>       Microphone gain 0.0-1.0 (default: 1.0)
+  -l, --list-devices       List available input devices
   -h, --help               Show this help message
 
 Examples:
-  node record-wav.mjs -o output.wav -d 5
-  node record-wav.mjs -s 16000 -d 30 -m
+  node record-mic.mjs -o output.wav -d 10
+  node record-mic.mjs -s 16000 -g 0.8
+  node record-mic.mjs -l  # list available microphones
 `)
+  process.exit(0)
+}
+
+// List devices if requested
+if (values['list-devices']) {
+  console.log('\nAvailable input devices:\n')
+  const devices = listAudioDevices().filter(d => d.isInput)
+  for (const device of devices) {
+    const defaultMarker = device.isDefault ? ' (default)' : ''
+    console.log(`  ${device.id}`)
+    console.log(`    Name: ${device.name}${defaultMarker}`)
+    console.log(`    Manufacturer: ${device.manufacturer || 'Unknown'}`)
+    console.log(`    Sample Rate: ${device.sampleRate} Hz`)
+    console.log(`    Channels: ${device.channelCount}`)
+    console.log('')
+  }
   process.exit(0)
 }
 
 const outputFile = values.output
 const duration = parseInt(values.duration, 10) * 1000 // Convert to ms
 const sampleRate = values['sample-rate'] ? parseInt(values['sample-rate'], 10) : undefined
-const mute = values.mute
-const stereo = values.stereo
+const deviceId = values['device-id']
+const gain = parseFloat(values.gain)
 
 console.log(`Recording to: ${outputFile}`)
 console.log(`Duration: ${duration / 1000} seconds`)
 if (sampleRate) console.log(`Sample rate: ${sampleRate} Hz`)
-console.log(`Mute: ${mute}`)
-console.log(`Channels: ${stereo ? 'stereo' : 'mono'}`)
+if (deviceId) console.log(`Device ID: ${deviceId}`)
+console.log(`Gain: ${gain}`)
 console.log('')
 
 // Buffer to collect all audio data
 const audioChunks = []
 let metadata = null
 
-const recorder = new SystemAudioRecorder({
+const recorder = new MicrophoneRecorder({
   sampleRate,
   chunkDurationMs: 100,
-  mute,
-  stereo,
+  deviceId,
+  gain,
 })
 
 recorder.on('metadata', (meta) => {
@@ -162,41 +181,35 @@ process.on('SIGINT', shutdown)
 process.on('SIGTERM', shutdown)
 
 // Check permission before starting
-function checkPermission() {
-  if (!isSystemAudioPermissionAvailable()) {
-    console.log('Warning: Permission API not available, proceeding anyway...\n')
-    return true
-  }
-
-  const status = getSystemAudioPermissionStatus()
+async function checkPermission() {
+  const status = getMicrophonePermissionStatus()
 
   if (status === 'authorized') {
     return true
   }
 
   if (status === 'denied') {
-    console.error('System audio recording permission denied.')
+    console.error('Microphone recording permission denied.')
     console.error('   Opening System Settings...\n')
     openSystemSettings()
-    console.error('   Please enable "System Audio Recording Only" for your terminal app.')
+    console.error('   Please enable "Microphone" access for your terminal app.')
     console.error('   Then run this command again.\n')
     return false
   }
 
-  // Status is 'unknown' - app not yet in System Settings list
-  // macOS doesn't show a permission dialog for System Audio Recording,
-  // so we need to direct the user to manually add the app in System Settings
-  console.error('System audio recording permission not configured.')
-  console.error('   Opening System Settings...\n')
-  openSystemSettings()
-  console.error('   Please add your terminal app to "System Audio Recording Only".')
-  console.error('   Then run this command again.\n')
-  return false
+  // Status is 'unknown' - request permission
+  console.log('Requesting microphone permission...')
+  const granted = await requestMicrophonePermission()
+  if (!granted) {
+    console.error('Microphone permission not granted.')
+    return false
+  }
+  return true
 }
 
 // Start recording
 try {
-  const hasPermission = checkPermission()
+  const hasPermission = await checkPermission()
   if (!hasPermission) {
     process.exit(1)
   }
