@@ -198,12 +198,21 @@ public func coreaudio_start_system_audio(
 
     // Create recorder
     let targetSampleRate: Double? = sampleRate > 0 ? sampleRate : nil
-    let recorder = NativeAudioRecorder(
-        deviceID: deviceID,
-        outputHandler: outputHandler,
-        convertToSampleRate: targetSampleRate,
-        chunkDuration: chunkDurationSec
-    )
+    let recorder: NativeAudioRecorder
+    do {
+        recorder = try NativeAudioRecorder(
+            deviceID: deviceID,
+            outputHandler: outputHandler,
+            convertToSampleRate: targetSampleRate,
+            chunkDuration: chunkDurationSec
+        )
+    } catch AudioFormatError.formatUnavailable(let deviceID, let status) {
+        session.emitEvent(2, message: "Failed to get audio format from device \(deviceID): OSStatus \(status)")
+        return -5
+    } catch {
+        session.emitEvent(2, message: "Failed to create recorder: \(error)")
+        return -6
+    }
 
     session.recorder = recorder
     session.isRunning = true

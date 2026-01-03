@@ -1,6 +1,6 @@
 {
   "name": "coreaudio-node",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Native macOS audio capture for Node.js - system audio and microphone recording",
   "type": "module",
   "main": "dist/index.js",

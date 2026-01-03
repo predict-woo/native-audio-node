@@ -2,14 +2,30 @@ import AudioToolbox
 import CoreAudio
 import Foundation
 
+public enum AudioFormatError: Error {
+    case deviceNotReady(AudioObjectID)
+    case formatUnavailable(AudioObjectID, OSStatus)
+
+    var localizedDescription: String {
+        switch self {
+        case .deviceNotReady(let deviceID):
+            return "Audio device \(deviceID) is not ready"
+        case .formatUnavailable(let deviceID, let status):
+            return "Failed to get stream format from device \(deviceID): OSStatus \(status)"
+        }
+    }
+}
+
 public class AudioFormatManager {
-    public static func getDeviceFormat(deviceID: AudioObjectID) -> AudioStreamBasicDescription {
-        let deviceReadyTimeout = 2.0
+    public static func getDeviceFormat(deviceID: AudioObjectID) throws -> AudioStreamBasicDescription {
+        let deviceReadyTimeout = 3.0  // Increased timeout
         let pollInterval = 0.1
         let maxPolls = Int(deviceReadyTimeout / pollInterval)
 
+        var deviceReady = false
         for poll in 1...maxPolls {
             if isAudioDeviceValid(deviceID) {
+                deviceReady = true
                 break
             }
 
@@ -20,8 +36,9 @@ public class AudioFormatManager {
             Thread.sleep(forTimeInterval: pollInterval)
         }
 
-        let maxRetries = 3
-        let retryDelayMs = 20
+        let maxRetries = 5  // Increased retries
+        let retryDelayMs = 50  // Increased delay
+        var lastStatus: OSStatus = noErr
 
         for attempt in 1...maxRetries {
             var propertyAddress = getPropertyAddress(
@@ -38,11 +55,13 @@ public class AudioFormatManager {
                 return streamFormat
             }
 
+            lastStatus = status
+
             if attempt < maxRetries {
                 Thread.sleep(forTimeInterval: Double(retryDelayMs) / 1000.0)
             }
         }
 
-        fatalError("Failed to get stream format from device: \(deviceID)")
+        throw AudioFormatError.formatUnavailable(deviceID, lastStatus)
     }
 }

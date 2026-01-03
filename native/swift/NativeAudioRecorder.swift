@@ -53,12 +53,12 @@ public class NativeAudioRecorder {
         outputHandler: NativeAudioOutputHandler,
         convertToSampleRate: Double? = nil,
         chunkDuration: Double = 0.2
-    ) {
+    ) throws {
         self.deviceID = deviceID
         self.outputHandler = outputHandler
 
         // Get source format and set up conversion if requested
-        let sourceFormat = AudioFormatManager.getDeviceFormat(deviceID: deviceID)
+        let sourceFormat = try AudioFormatManager.getDeviceFormat(deviceID: deviceID)
 
         // Set up the audio buffer using source format and configurable chunk duration
         self.audioBuffer = AudioBuffer(format: sourceFormat, chunkDuration: chunkDuration)
