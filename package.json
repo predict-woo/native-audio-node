@@ -1,6 +1,6 @@
 {
   "name": "audiotee",
-  "version": "0.0.7",
+  "version": "0.0.8",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -14,10 +14,16 @@
   },
   "files": [
     "dist/",
-    "bin/"
+    "build/Release/"
   ],
   "scripts": {
-    "build": "tsup",
+    "install": "cmake-js compile",
+    "build:native": "cmake-js compile",
+    "build:native:debug": "cmake-js compile --debug",
+    "rebuild": "cmake-js rebuild",
+    "clean": "cmake-js clean",
+    "build:ts": "tsup",
+    "build": "npm run build:native && npm run build:ts",
     "dev": "tsup --watch",
     "test": "vitest",
     "prepublishOnly": "npm run build"
@@ -25,8 +31,19 @@
   "engines": {
     "node": ">=20"
   },
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "x64",
+    "arm64"
+  ],
+  "dependencies": {
+    "node-addon-api": "^8.3.0"
+  },
   "devDependencies": {
     "@types/node": "^24.1.0",
+    "cmake-js": "^7.3.0",
     "tsup": "^8.5.0",
     "typescript": "^5.8.3"
   }

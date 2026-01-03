@@ -1,20 +1,84 @@
-import { spawn, ChildProcess } from 'child_process'
 import { EventEmitter } from 'events'
-import path, { join } from 'path'
-import type { AudioTeeOptions, LogMessage, AudioTeeEvents } from './types.js'
+import { createRequire } from 'module'
+import path from 'path'
 import { fileURLToPath } from 'url'
+import type { AudioTeeOptions, AudioTeeEvents, AudioChunk, AudioMetadata } from './types.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const require = createRequire(import.meta.url)
 
-// FIXME: not emitting start, stop, or any events really
+// Native addon event interface
+interface NativeEvent {
+  type: number // 0=data, 1=start, 2=stop, 3=error, 4=metadata
+  data?: Buffer
+  message?: string
+  sampleRate?: number
+  channelsPerFrame?: number
+  bitsPerChannel?: number
+  isFloat?: boolean
+  encoding?: string
+}
+
+interface AudioTeeNativeClass {
+  start(options: {
+    sampleRate?: number
+    chunkDurationMs?: number
+    mute?: boolean
+    stereo?: boolean
+    includeProcesses?: number[]
+    excludeProcesses?: number[]
+  }): void
+  stop(): void
+  isRunning(): boolean
+  processEvents(): NativeEvent[]
+}
+
+interface AudioTeeNativeConstructor {
+  new (): AudioTeeNativeClass
+}
+
+let AudioTeeNative: AudioTeeNativeConstructor
+
+function loadNativeAddon(): AudioTeeNativeConstructor {
+  const paths = [
+    // Development: build/Release relative to dist/
+    path.join(__dirname, '..', 'build', 'Release', 'audiotee.node'),
+    // Installed package: build/Release at package root
+    path.join(__dirname, '..', '..', 'build', 'Release', 'audiotee.node'),
+  ]
+
+  for (const addonPath of paths) {
+    try {
+      const addon = require(addonPath)
+      return addon.AudioTeeNative
+    } catch {
+      // Try next path
+    }
+  }
+
+  throw new Error(
+    `Failed to load native AudioTee addon. Make sure you've built the native module with 'npm run build:native'.`
+  )
+}
+
+AudioTeeNative = loadNativeAddon()
+
 export class AudioTee {
   private events = new EventEmitter()
-  private process: ChildProcess | null = null
-  private isRunning = false
+  private native: AudioTeeNativeClass
+  private running = false
   private options: AudioTeeOptions
+  private pollInterval: ReturnType<typeof setInterval> | null = null
+  private metadata: AudioMetadata | null = null
 
   constructor(options: AudioTeeOptions = {}) {
+    // Check platform at construction time
+    if (process.platform !== 'darwin') {
+      throw new Error(`AudioTee only supports macOS (darwin). Current platform: ${process.platform}`)
+    }
+
     this.options = options
+    this.native = new AudioTeeNative()
   }
 
   on<K extends keyof AudioTeeEvents>(event: K, listener: AudioTeeEvents[K]): this {
@@ -37,136 +101,114 @@ export class AudioTee {
     return this
   }
 
-  private emit<K extends keyof AudioTeeEvents>(event: K, ...args: Parameters<AudioTeeEvents[K]>): boolean {
+  private emit<K extends keyof AudioTeeEvents>(
+    event: K,
+    ...args: Parameters<AudioTeeEvents[K]>
+  ): boolean {
     return this.events.emit(event, ...args)
   }
 
-  private buildArguments(): string[] {
-    const args: string[] = []
+  private processNativeEvents(): void {
+    const events = this.native.processEvents()
 
-    if (this.options.sampleRate !== undefined) {
-      args.push('--sample-rate', this.options.sampleRate.toString())
-    }
+    for (const event of events) {
+      switch (event.type) {
+        case 0: // data
+          if (event.data) {
+            const chunk: AudioChunk = { data: event.data }
+            this.emit('data', chunk)
+          }
+          break
 
-    if (this.options.chunkDurationMs !== undefined) {
-      // the underlying audiotee binary still expects the chunk duration in seconds
-      args.push('--chunk-duration', (this.options.chunkDurationMs / 1000).toString())
-    }
-
-    if (this.options.mute) {
-      args.push('--mute')
-    }
-
-    if (this.options.includeProcesses && this.options.includeProcesses.length > 0) {
-      args.push('--include-processes', ...this.options.includeProcesses.map((p) => p.toString()))
-    }
-
-    if (this.options.excludeProcesses && this.options.excludeProcesses.length > 0) {
-      args.push('--exclude-processes', ...this.options.excludeProcesses.map((p) => p.toString()))
-    }
-
-    return args
-  }
-
-  private handleStderr(data: Buffer): void {
-    const text = data.toString('utf8')
-    const lines = text.split('\n').filter((line) => line.trim())
-
-    for (const line of lines) {
-      try {
-        const logMessage: LogMessage = JSON.parse(line)
-
-        // Only emit log events for debug and info types
-        if (logMessage.message_type === 'debug' || logMessage.message_type === 'info') {
-          this.emit('log', logMessage.message_type, logMessage.data)
-        }
-
-        // Handle specific message types
-        if (logMessage.message_type === 'stream_start') {
+        case 1: // start
           this.emit('start')
-        } else if (logMessage.message_type === 'stream_stop') {
+          break
+
+        case 2: // stop
           this.emit('stop')
-        } else if (logMessage.message_type === 'error') {
-          this.emit('error', new Error(logMessage.data.message))
-        }
-      } catch (parseError) {
-        console.error('Error parsing log message:', parseError)
-        // TODO: handle this
+          break
+
+        case 3: // error
+          this.emit('error', new Error(event.message || 'Unknown error'))
+          break
+
+        case 4: // metadata
+          this.metadata = {
+            sampleRate: event.sampleRate!,
+            channelsPerFrame: event.channelsPerFrame!,
+            bitsPerChannel: event.bitsPerChannel!,
+            isFloat: event.isFloat!,
+            encoding: event.encoding!,
+          }
+          this.emit('metadata', this.metadata)
+          break
       }
     }
   }
 
   start(): Promise<void> {
     return new Promise((resolve, reject) => {
-      if (this.isRunning) {
+      if (this.running) {
         reject(new Error('AudioTee is already running'))
         return
       }
 
-      // Check platform at runtime
-      if (process.platform !== 'darwin') {
-        reject(new Error(`AudioTee currently only supports macOS (darwin). Current platform: ${process.platform}`))
-        return
-      }
+      try {
+        this.native.start({
+          sampleRate: this.options.sampleRate,
+          chunkDurationMs: this.options.chunkDurationMs,
+          mute: this.options.mute,
+          stereo: this.options.stereo,
+          includeProcesses: this.options.includeProcesses,
+          excludeProcesses: this.options.excludeProcesses,
+        })
 
-      const binaryPath = this.options.binaryPath ?? join(__dirname, '..', 'bin', 'audiotee')
-      const args = this.buildArguments()
+        this.running = true
 
-      this.process = spawn(binaryPath, args)
+        // Start polling for events from the native addon
+        // Use a fast interval to ensure low latency for audio data
+        this.pollInterval = setInterval(() => {
+          if (this.running) {
+            this.processNativeEvents()
+          }
+        }, 10) // Poll every 10ms for responsive audio
 
-      this.process.on('error', (error) => {
-        this.isRunning = false
-        this.emit('error', error)
+        resolve()
+      } catch (error) {
         reject(error)
-      })
-
-      this.process.on('exit', (code, signal) => {
-        this.isRunning = false
-        if (code !== 0 && code !== null) {
-          const error = new Error(`AudioTee process exited with code ${code}`)
-          this.emit('error', error)
-        }
-      })
-
-      this.process.stdout?.on('data', (data: Buffer) => {
-        this.emit('data', { data: data })
-      })
-
-      this.process.stderr?.on('data', (data: Buffer) => {
-        this.handleStderr(data)
-      })
-
-      this.isRunning = true
-      resolve()
+      }
     })
   }
 
   stop(): Promise<void> {
     return new Promise((resolve) => {
-      if (!this.isRunning || !this.process) {
+      if (!this.running) {
         resolve()
         return
       }
 
-      // Force kill after 5 seconds if process doesn't respond
-      const timeout = setTimeout(() => {
-        if (this.process && this.isRunning) {
-          this.process.kill('SIGKILL')
-        }
-      }, 5000)
+      // Stop the polling interval
+      if (this.pollInterval) {
+        clearInterval(this.pollInterval)
+        this.pollInterval = null
+      }
 
-      this.process.once('exit', () => {
-        clearTimeout(timeout)
-        this.isRunning = false
-        this.process = null
-        resolve()
-      })
+      // Process any remaining events
+      this.processNativeEvents()
 
-      this.process.kill('SIGTERM')
+      // Stop the native addon
+      this.native.stop()
+      this.running = false
+
+      resolve()
     })
   }
 
   isActive(): boolean {
-    return this.isRunning
+    return this.running
+  }
+
+  getMetadata(): AudioMetadata | null {
+    return this.metadata
   }
 }
