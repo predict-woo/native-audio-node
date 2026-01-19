@@ -7,7 +7,7 @@ import {
   openSystemSettings,
   ensureSystemAudioPermission,
   PermissionError,
-} from '../dist/index.js'
+} from '../packages/native-audio-node/dist/index.js'
 
 console.log('Testing System Audio Permission API\n')
 

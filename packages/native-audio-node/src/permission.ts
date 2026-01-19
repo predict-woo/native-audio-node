@@ -1,45 +1,6 @@
-import { createRequire } from 'module'
-import path from 'path'
-import { fileURLToPath } from 'url'
+import { loadBinding, type PermissionStatus } from './binding.js'
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const require = createRequire(import.meta.url)
-
-export type PermissionStatus = 'unknown' | 'denied' | 'authorized'
-
-interface NativeAddon {
-  // System audio permission
-  getSystemAudioPermissionStatus(): PermissionStatus
-  isSystemAudioPermissionAvailable(): boolean
-  requestSystemAudioPermission(callback: (granted: boolean) => void): void
-  // Microphone permission
-  getMicPermissionStatus(): PermissionStatus
-  requestMicPermission(callback: (granted: boolean) => void): void
-  // Shared
-  openSystemSettings(): boolean
-}
-
-let addon: NativeAddon | null = null
-
-function loadAddon(): NativeAddon {
-  if (addon) return addon
-
-  const paths = [
-    path.join(__dirname, '..', 'build', 'Release', 'native_audio.node'),
-    path.join(__dirname, '..', '..', 'build', 'Release', 'native_audio.node'),
-  ]
-
-  for (const addonPath of paths) {
-    try {
-      addon = require(addonPath)
-      return addon!
-    } catch {
-      // Try next path
-    }
-  }
-
-  throw new Error('Failed to load native audio addon')
-}
+export type { PermissionStatus }
 
 // ============================================================================
 // System Audio Permission
@@ -54,7 +15,7 @@ function loadAddon(): NativeAddon {
  * @returns 'authorized' | 'denied' | 'unknown'
  */
 export function getSystemAudioPermissionStatus(): PermissionStatus {
-  return loadAddon().getSystemAudioPermissionStatus()
+  return loadBinding().getSystemAudioPermissionStatus()
 }
 
 /**
@@ -64,7 +25,7 @@ export function getSystemAudioPermissionStatus(): PermissionStatus {
  * **Windows:** Always returns true.
  */
 export function isSystemAudioPermissionAvailable(): boolean {
-  return loadAddon().isSystemAudioPermissionAvailable()
+  return loadBinding().isSystemAudioPermissionAvailable()
 }
 
 /**
@@ -78,7 +39,7 @@ export function isSystemAudioPermissionAvailable(): boolean {
  */
 export function requestSystemAudioPermission(): Promise<boolean> {
   return new Promise((resolve) => {
-    loadAddon().requestSystemAudioPermission((granted) => {
+    loadBinding().requestSystemAudioPermission((granted) => {
       resolve(granted)
     })
   })
@@ -97,7 +58,7 @@ export function requestSystemAudioPermission(): Promise<boolean> {
  * @returns 'authorized' | 'denied' | 'unknown'
  */
 export function getMicrophonePermissionStatus(): PermissionStatus {
-  return loadAddon().getMicPermissionStatus()
+  return loadBinding().getMicPermissionStatus()
 }
 
 /**
@@ -110,7 +71,7 @@ export function getMicrophonePermissionStatus(): PermissionStatus {
  */
 export function requestMicrophonePermission(): Promise<boolean> {
   return new Promise((resolve) => {
-    loadAddon().requestMicPermission((granted) => {
+    loadBinding().requestMicPermission((granted) => {
       resolve(granted)
     })
   })
@@ -129,7 +90,7 @@ export function requestMicrophonePermission(): Promise<boolean> {
  * @returns true if settings was opened successfully
  */
 export function openSystemSettings(): boolean {
-  return loadAddon().openSystemSettings()
+  return loadBinding().openSystemSettings()
 }
 
 /**

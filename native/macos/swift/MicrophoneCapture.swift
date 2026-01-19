@@ -193,7 +193,7 @@ class MicrophoneRecorder: NSObject {
         isRecording = false
 
         // Process any remaining audio
-        if let buffer = audioBuffer, let format = finalFormat {
+        if let buffer = audioBuffer, finalFormat != nil {
             buffer.processChunks().forEach { packet in
                 let processedPacket = converter?.transform(packet) ?? packet
                 outputHandler.handleAudioPacket(processedPacket)
@@ -286,7 +286,7 @@ extension MicrophoneRecorder: AVCaptureAudioDataOutputSampleBufferDelegate {
         // Get audio buffer list from sample buffer
         var blockBuffer: CMBlockBuffer?
         var audioBufferList = AudioBufferList()
-        var bufferListSize = MemoryLayout<AudioBufferList>.size
+        let bufferListSize = MemoryLayout<AudioBufferList>.size
 
         let status = CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(
             sampleBuffer,

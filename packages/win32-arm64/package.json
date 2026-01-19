@@ -1,0 +1,24 @@
+{
+  "name": "@native-audio-node/win32-arm64",
+  "version": "0.3.0",
+  "description": "Native audio capture binary for Windows ARM64",
+  "license": "MIT",
+  "author": "",
+  "repository": {
+    "type": "git",
+    "url": ""
+  },
+  "main": "native_audio.node",
+  "files": [
+    "native_audio.node"
+  ],
+  "os": [
+    "win32"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -64,7 +64,7 @@ class AudioDeviceManager {
             return DeviceInfo(
                 uid: device.uniqueID,
                 name: device.localizedName,
-                manufacturer: device.manufacturer ?? "",
+                manufacturer: device.manufacturer,
                 isDefault: device.uniqueID == defaultDevice?.uniqueID,
                 isInput: true,
                 isOutput: false,
@@ -225,18 +225,23 @@ class AudioDeviceManager {
             mElement: kAudioObjectPropertyElementMain
         )
 
-        var uid: CFString?
-        var dataSize = UInt32(MemoryLayout<CFString?>.size)
+        var uid: Unmanaged<CFString>?
+        var dataSize = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
 
-        let status = AudioObjectGetPropertyData(
-            deviceID,
-            &propertyAddress,
-            0, nil,
-            &dataSize,
-            &uid
-        )
+        let status = withUnsafeMutablePointer(to: &uid) { uidPtr in
+            AudioObjectGetPropertyData(
+                deviceID,
+                &propertyAddress,
+                0, nil,
+                &dataSize,
+                uidPtr
+            )
+        }
 
-        return status == noErr ? (uid as String?) : nil
+        guard status == noErr, let cfString = uid?.takeUnretainedValue() else {
+            return nil
+        }
+        return cfString as String
     }
 
     private static func getDeviceName(deviceID: AudioDeviceID) -> String? {
@@ -246,18 +251,23 @@ class AudioDeviceManager {
             mElement: kAudioObjectPropertyElementMain
         )
 
-        var name: CFString?
-        var dataSize = UInt32(MemoryLayout<CFString?>.size)
+        var name: Unmanaged<CFString>?
+        var dataSize = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
 
-        let status = AudioObjectGetPropertyData(
-            deviceID,
-            &propertyAddress,
-            0, nil,
-            &dataSize,
-            &name
-        )
+        let status = withUnsafeMutablePointer(to: &name) { namePtr in
+            AudioObjectGetPropertyData(
+                deviceID,
+                &propertyAddress,
+                0, nil,
+                &dataSize,
+                namePtr
+            )
+        }
 
-        return status == noErr ? (name as String?) : nil
+        guard status == noErr, let cfString = name?.takeUnretainedValue() else {
+            return nil
+        }
+        return cfString as String
     }
 
     private static func getDeviceManufacturer(deviceID: AudioDeviceID) -> String? {
@@ -267,18 +277,23 @@ class AudioDeviceManager {
             mElement: kAudioObjectPropertyElementMain
         )
 
-        var manufacturer: CFString?
-        var dataSize = UInt32(MemoryLayout<CFString?>.size)
+        var manufacturer: Unmanaged<CFString>?
+        var dataSize = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
 
-        let status = AudioObjectGetPropertyData(
-            deviceID,
-            &propertyAddress,
-            0, nil,
-            &dataSize,
-            &manufacturer
-        )
+        let status = withUnsafeMutablePointer(to: &manufacturer) { mfgPtr in
+            AudioObjectGetPropertyData(
+                deviceID,
+                &propertyAddress,
+                0, nil,
+                &dataSize,
+                mfgPtr
+            )
+        }
 
-        return status == noErr ? (manufacturer as String?) : nil
+        guard status == noErr, let cfString = manufacturer?.takeUnretainedValue() else {
+            return nil
+        }
+        return cfString as String
     }
 
     private static func getDeviceSampleRate(deviceID: AudioDeviceID) -> Double {
@@ -357,49 +372,61 @@ class AudioDeviceManager {
 
 // MARK: - C-Compatible API
 
-// C struct matching audio_bridge.h AudioDeviceInfo
-@frozen
-public struct CAudioDeviceInfo {
-    var uid: UnsafeMutablePointer<CChar>?
-    var name: UnsafeMutablePointer<CChar>?
-    var manufacturer: UnsafeMutablePointer<CChar>?
-    var isDefault: Bool
-    var isInput: Bool
-    var isOutput: Bool
-    var sampleRate: Double
-    var channelCount: UInt32
-}
+// C struct layout matching audio_bridge.h AudioDeviceInfo
+// Using a tuple-based struct for C ABI compatibility with @_cdecl
+// Layout: uid (8 bytes), name (8 bytes), manufacturer (8 bytes), 
+//         isDefault (1 byte), isInput (1 byte), isOutput (1 byte), padding (5 bytes),
+//         sampleRate (8 bytes), channelCount (4 bytes), padding (4 bytes)
+// Total: 48 bytes on 64-bit systems
+
+private let CAudioDeviceInfoSize = 48  // Size of AudioDeviceInfo struct in C
 
 @_cdecl("audio_list_devices")
 public func audio_list_devices(
-    devices: UnsafeMutablePointer<UnsafeMutablePointer<CAudioDeviceInfo>?>,
+    devices: UnsafeMutableRawPointer,  // AudioDeviceInfo** 
     count: UnsafeMutablePointer<Int32>
 ) -> Int32 {
     let deviceList = AudioDeviceManager.listAllDevices()
+    
+    // Cast to the correct pointer type for the out parameter
+    let devicesOut = devices.assumingMemoryBound(to: UnsafeMutableRawPointer?.self)
 
     guard !deviceList.isEmpty else {
-        devices.pointee = nil
+        devicesOut.pointee = nil
         count.pointee = 0
         return 0
     }
 
-    // Allocate array of CAudioDeviceInfo structs
-    let arrayPointer = UnsafeMutablePointer<CAudioDeviceInfo>.allocate(capacity: deviceList.count)
+    // Allocate raw memory for the array of C structs
+    let arrayPointer = UnsafeMutableRawPointer.allocate(
+        byteCount: CAudioDeviceInfoSize * deviceList.count,
+        alignment: 8
+    )
 
     for (index, device) in deviceList.enumerated() {
-        arrayPointer[index] = CAudioDeviceInfo(
-            uid: strdup(device.uid),
-            name: strdup(device.name),
-            manufacturer: strdup(device.manufacturer),
-            isDefault: device.isDefault,
-            isInput: device.isInput,
-            isOutput: device.isOutput,
-            sampleRate: device.sampleRate,
-            channelCount: device.channelCount
-        )
+        let offset = index * CAudioDeviceInfoSize
+        let itemPointer = arrayPointer.advanced(by: offset)
+        
+        // Write each field at the correct offset
+        // uid (offset 0)
+        itemPointer.storeBytes(of: strdup(device.uid), as: UnsafeMutablePointer<CChar>?.self)
+        // name (offset 8)
+        itemPointer.advanced(by: 8).storeBytes(of: strdup(device.name), as: UnsafeMutablePointer<CChar>?.self)
+        // manufacturer (offset 16)
+        itemPointer.advanced(by: 16).storeBytes(of: strdup(device.manufacturer), as: UnsafeMutablePointer<CChar>?.self)
+        // isDefault (offset 24)
+        itemPointer.advanced(by: 24).storeBytes(of: device.isDefault, as: Bool.self)
+        // isInput (offset 25)
+        itemPointer.advanced(by: 25).storeBytes(of: device.isInput, as: Bool.self)
+        // isOutput (offset 26)
+        itemPointer.advanced(by: 26).storeBytes(of: device.isOutput, as: Bool.self)
+        // sampleRate (offset 32 - after padding)
+        itemPointer.advanced(by: 32).storeBytes(of: device.sampleRate, as: Double.self)
+        // channelCount (offset 40)
+        itemPointer.advanced(by: 40).storeBytes(of: device.channelCount, as: UInt32.self)
     }
 
-    devices.pointee = arrayPointer
+    devicesOut.pointee = arrayPointer
     count.pointee = Int32(deviceList.count)
 
     return 0
@@ -407,19 +434,25 @@ public func audio_list_devices(
 
 @_cdecl("audio_free_device_list")
 public func audio_free_device_list(
-    devices: UnsafeMutablePointer<CAudioDeviceInfo>?,
+    devices: UnsafeMutableRawPointer?,  // AudioDeviceInfo*
     count: Int32
 ) {
     guard let devices = devices else { return }
 
     for i in 0..<Int(count) {
-        if let uid = devices[i].uid {
+        let offset = i * CAudioDeviceInfoSize
+        let itemPointer = devices.advanced(by: offset)
+        
+        // Free uid string (offset 0)
+        if let uid = itemPointer.load(as: UnsafeMutablePointer<CChar>?.self) {
             free(uid)
         }
-        if let name = devices[i].name {
+        // Free name string (offset 8)
+        if let name = itemPointer.advanced(by: 8).load(as: UnsafeMutablePointer<CChar>?.self) {
             free(name)
         }
-        if let manufacturer = devices[i].manufacturer {
+        // Free manufacturer string (offset 16)
+        if let manufacturer = itemPointer.advanced(by: 16).load(as: UnsafeMutablePointer<CChar>?.self) {
             free(manufacturer)
         }
     }

@@ -7,7 +7,7 @@ import type { SystemAudioRecorderOptions } from './types.js'
  *
  * @example
  * ```typescript
- * import { SystemAudioRecorder } from 'coreaudio-node'
+ * import { SystemAudioRecorder } from 'native-audio-node'
  *
  * const recorder = new SystemAudioRecorder({
  *   sampleRate: 16000,

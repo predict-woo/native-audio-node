@@ -1,43 +1,6 @@
 import { EventEmitter } from 'events'
-import { createRequire } from 'module'
-import path from 'path'
-import { fileURLToPath } from 'url'
-import type {
-  AudioRecorderEvents,
-  AudioChunk,
-  AudioMetadata,
-  AudioRecorderNativeClass,
-  AudioRecorderNativeConstructor,
-} from './types.js'
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const require = createRequire(import.meta.url)
-
-let AudioRecorderNative: AudioRecorderNativeConstructor
-
-function loadNativeAddon(): AudioRecorderNativeConstructor {
-  const paths = [
-    // Development: build/Release relative to dist/
-    path.join(__dirname, '..', 'build', 'Release', 'native_audio.node'),
-    // Installed package: build/Release at package root
-    path.join(__dirname, '..', '..', 'build', 'Release', 'native_audio.node'),
-  ]
-
-  for (const addonPath of paths) {
-    try {
-      const addon = require(addonPath)
-      return addon.AudioRecorderNative
-    } catch {
-      // Try next path
-    }
-  }
-
-  throw new Error(
-    `Failed to load native audio addon. Make sure you've built the native module with 'npm run build:native'.`
-  )
-}
-
-AudioRecorderNative = loadNativeAddon()
+import { getAudioRecorderNative } from './binding.js'
+import type { AudioRecorderEvents, AudioChunk, AudioMetadata, AudioRecorderNativeClass } from './types.js'
 
 /**
  * Abstract base class for audio recorders.
@@ -54,11 +17,10 @@ export abstract class BaseAudioRecorder {
     // Check platform at construction time
     const supportedPlatforms = ['darwin', 'win32']
     if (!supportedPlatforms.includes(process.platform)) {
-      throw new Error(
-        `native-audio-node only supports macOS and Windows. Current platform: ${process.platform}`
-      )
+      throw new Error(`native-audio-node only supports macOS and Windows. Current platform: ${process.platform}`)
     }
 
+    const AudioRecorderNative = getAudioRecorderNative()
     this.native = new AudioRecorderNative()
   }
 
@@ -82,10 +44,7 @@ export abstract class BaseAudioRecorder {
     return this
   }
 
-  protected emit<K extends keyof AudioRecorderEvents>(
-    event: K,
-    ...args: Parameters<AudioRecorderEvents[K]>
-  ): boolean {
+  protected emit<K extends keyof AudioRecorderEvents>(event: K, ...args: Parameters<AudioRecorderEvents[K]>): boolean {
     return this.events.emit(event, ...args)
   }
 

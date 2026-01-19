@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { listAudioDevices, getDefaultInputDevice, getDefaultOutputDevice } from '../dist/index.js'
+import { listAudioDevices, getDefaultInputDevice, getDefaultOutputDevice } from '../packages/native-audio-node/dist/index.js'
 
 console.log('Default input device:', getDefaultInputDevice())
 console.log('Default output device:', getDefaultOutputDevice())

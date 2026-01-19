@@ -7,7 +7,7 @@ import type { MicrophoneRecorderOptions } from './types.js'
  *
  * @example
  * ```typescript
- * import { MicrophoneRecorder, listAudioDevices } from 'coreaudio-node'
+ * import { MicrophoneRecorder, listAudioDevices } from 'native-audio-node'
  *
  * // List available input devices
  * const devices = listAudioDevices().filter(d => d.isInput)

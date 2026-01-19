@@ -6,7 +6,7 @@ import {
   getMicrophonePermissionStatus,
   requestMicrophonePermission,
   openSystemSettings,
-} from '../dist/index.js'
+} from '../packages/native-audio-node/dist/index.js'
 import { writeFileSync } from 'fs'
 import { parseArgs } from 'util'
 

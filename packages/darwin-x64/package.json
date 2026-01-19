@@ -1,0 +1,24 @@
+{
+  "name": "@native-audio-node/darwin-x64",
+  "version": "0.3.0",
+  "description": "Native audio capture binary for macOS Intel (x64)",
+  "license": "MIT",
+  "author": "",
+  "repository": {
+    "type": "git",
+    "url": ""
+  },
+  "main": "native_audio.node",
+  "files": [
+    "native_audio.node"
+  ],
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "engines": {
+    "node": ">=20"
+  }
+}

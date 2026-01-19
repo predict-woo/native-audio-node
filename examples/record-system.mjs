@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { SystemAudioRecorder, getSystemAudioPermissionStatus, isSystemAudioPermissionAvailable, openSystemSettings } from '../dist/index.js'
+import { SystemAudioRecorder, getSystemAudioPermissionStatus, isSystemAudioPermissionAvailable, openSystemSettings } from '../packages/native-audio-node/dist/index.js'
 import { writeFileSync } from 'fs'
 import { parseArgs } from 'util'
 

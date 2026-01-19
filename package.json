@@ -1,71 +1,27 @@
 {
-  "name": "native-audio-node",
-  "version": "0.2.0",
-  "description": "Native audio capture for Node.js - system audio and microphone recording (macOS & Windows)",
+  "name": "native-audio-node-monorepo",
+  "version": "0.3.0",
+  "private": true,
+  "description": "Monorepo for native-audio-node packages",
   "type": "module",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
-  "license": "MIT",
-  "author": "",
-  "repository": {
-    "type": "git",
-    "url": ""
-  },
-  "keywords": [
-    "audio",
-    "macos",
-    "windows",
-    "coreaudio",
-    "wasapi",
-    "microphone",
-    "system-audio",
-    "loopback",
-    "recording",
-    "capture",
-    "native",
-    "node-addon"
-  ],
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js",
-      "require": "./dist/index.js"
-    }
-  },
-  "files": [
-    "dist/",
-    "build/Release/",
-    "README.md"
-  ],
   "scripts": {
     "build:native": "cmake-js compile",
     "build:native:debug": "cmake-js compile --debug",
     "rebuild": "cmake-js rebuild",
-    "clean": "cmake-js clean",
-    "build:ts": "tsup",
-    "build": "npm run build:native && npm run build:ts",
-    "dev": "tsup --watch",
-    "test": "vitest",
-    "prepublishOnly": "npm run build"
-  },
-  "engines": {
-    "node": ">=20"
-  },
-  "os": [
-    "darwin",
-    "win32"
-  ],
-  "cpu": [
-    "x64",
-    "arm64"
-  ],
-  "dependencies": {
-    "node-addon-api": "^8.3.0"
+    "clean:native": "cmake-js clean",
+    "build:ts": "pnpm --filter native-audio-node run build",
+    "build": "pnpm run build:native && pnpm run copy-binary && pnpm run build:ts",
+    "dev": "pnpm --filter native-audio-node run dev",
+    "copy-binary": "node scripts/copy-binary.js",
+    "publish:all": "pnpm -r publish --access public",
+    "version:all": "pnpm -r exec npm version"
   },
   "devDependencies": {
     "@types/node": "^24.1.0",
     "cmake-js": "^7.3.0",
-    "tsup": "^8.5.0",
-    "typescript": "^5.8.3"
+    "node-addon-api": "^8.3.0"
+  },
+  "engines": {
+    "node": ">=20"
   }
 }

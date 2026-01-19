@@ -22,10 +22,8 @@ public class AudioFormatManager {
         let pollInterval = 0.1
         let maxPolls = Int(deviceReadyTimeout / pollInterval)
 
-        var deviceReady = false
         for poll in 1...maxPolls {
             if isAudioDeviceValid(deviceID) {
-                deviceReady = true
                 break
             }
 
