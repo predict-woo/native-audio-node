@@ -135,14 +135,16 @@ export class MicrophoneActivityMonitor {
     return devices
   }
 
-  /**
+/**
    * Get list of processes currently using the microphone.
    *
    * **macOS:** Uses Core Audio's kAudioHardwarePropertyProcessObjectList API
    * to identify which applications are actively using microphone input.
-   * No special permissions required beyond microphone access.
+   * Returns process name, PID, and bundle identifier.
    *
-   * **Windows:** Returns an empty array (not yet implemented).
+   * **Windows:** Uses WASAPI IAudioSessionManager2 to enumerate active capture
+   * sessions on the default microphone device. Returns process name and PID.
+   * Bundle ID is always empty (Windows doesn't have bundle identifiers).
    *
    * @returns Array of processes currently using the microphone
    *

@@ -24,7 +24,7 @@ A TypeScript-first library that provides low-latency access to native audio APIs
 | System audio capture | ✅ | ✅ |
 | Microphone capture | ✅ | ✅ |
 | Microphone activity monitoring | ✅ | ✅ |
-| Identify processes using mic | ✅ | ❌ |
+| Identify processes using mic | ✅ | ✅ |
 | Process filtering (include) | ✅ Multiple PIDs | ✅ Single PID* |
 | Process filtering (exclude) | ✅ Multiple PIDs | ✅ Single PID* |
 | Mute captured processes | ✅ | ❌ |
@@ -192,7 +192,7 @@ const monitor = new MicrophoneActivityMonitor(options?: MicrophoneActivityMonito
 | `isActive()` | `boolean` | Check if any microphone is currently in use |
 | `isRunning()` | `boolean` | Check if the monitor is currently running |
 | `getActiveDevices()` | `AudioDevice[]` | Get list of devices currently being used |
-| `getActiveProcesses()` | `AudioProcess[]` | Get list of processes using the microphone (**macOS only**) |
+| `getActiveProcesses()` | `AudioProcess[]` | Get list of processes using the microphone |
 
 **Events:**
 
@@ -206,7 +206,7 @@ interface MicrophoneActivityMonitorEvents {
 
 | Event | Payload | Description |
 |-------|---------|-------------|
-| `change` | `isActive`, `processes` | Aggregate mic activity changed; includes processes on macOS |
+| `change` | `isActive`, `processes` | Aggregate mic activity changed; includes active processes |
 | `deviceChange` | `device`, `isActive` | Specific device activity changed |
 | `error` | `Error` | An error occurred during monitoring |
 
@@ -308,13 +308,13 @@ interface AudioDevice {
 
 #### `AudioProcess`
 
-Information about a process using audio input (**macOS only**).
+Information about a process using audio input.
 
 ```typescript
 interface AudioProcess {
   pid: number       // Process ID
   name: string      // Process name (e.g., "Zoom", "node")
-  bundleId: string  // macOS bundle identifier (e.g., "us.zoom.xos")
+  bundleId: string  // macOS bundle identifier (e.g., "us.zoom.xos"), empty on Windows
 }
 ```
 

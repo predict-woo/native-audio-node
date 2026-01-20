@@ -92,11 +92,17 @@ export interface NativeEvent {
 // ============================================================================
 
 /**
- * Information about a process using audio.
+ * Information about a process using audio input.
  */
 export interface AudioProcess {
+  /** Process ID */
   pid: number
+  /** Process name (e.g., "Zoom", "node") */
   name: string
+  /**
+   * macOS bundle identifier (e.g., "us.zoom.xos").
+   * Always empty string on Windows (bundle IDs don't exist on Windows).
+   */
   bundleId: string
 }
 

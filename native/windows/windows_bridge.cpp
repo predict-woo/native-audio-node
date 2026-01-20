@@ -2,9 +2,34 @@
 #include "wasapi_capture.h"
 #include <combaseapi.h>
 #include <cstring>
+#include <mmdeviceapi.h>
+#include <audiopolicy.h>
+#include <Psapi.h>
+#include <vector>
+
+#pragma comment(lib, "Psapi.lib")
 
 // Thread-local COM initialization tracking
 static thread_local bool comInitialized = false;
+
+// Helper function to get process name from PID
+static std::wstring GetProcessNameFromPid(DWORD pid) {
+    std::wstring name;
+    HANDLE hProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ, FALSE, pid);
+    if (hProcess) {
+        WCHAR buffer[MAX_PATH];
+        if (GetModuleBaseNameW(hProcess, NULL, buffer, MAX_PATH) > 0) {
+            name = buffer;
+            // Remove .exe extension if present
+            size_t extPos = name.rfind(L".exe");
+            if (extPos != std::wstring::npos && extPos == name.length() - 4) {
+                name = name.substr(0, extPos);
+            }
+        }
+        CloseHandle(hProcess);
+    }
+    return name;
+}
 
 static void EnsureComInitialized() {
     if (!comInitialized) {
@@ -303,6 +328,221 @@ void mic_activity_free_device_ids(char** deviceIds, int32_t count) {
     }
     
     free(deviceIds);
+}
+
+int32_t mic_activity_get_active_processes(
+    MicActivityMonitorHandle handle,
+    int32_t** pids,
+    char*** names,
+    char*** bundleIds,
+    int32_t* count
+) {
+    if (!pids || !names || !bundleIds || !count) {
+        return -1;
+    }
+
+    // Initialize outputs
+    *pids = nullptr;
+    *names = nullptr;
+    *bundleIds = nullptr;
+    *count = 0;
+
+    EnsureComInitialized();
+
+    HRESULT hr = S_OK;
+    
+    // Get device enumerator
+    IMMDeviceEnumerator* pEnumerator = nullptr;
+    hr = CoCreateInstance(
+        __uuidof(MMDeviceEnumerator),
+        nullptr,
+        CLSCTX_ALL,
+        __uuidof(IMMDeviceEnumerator),
+        reinterpret_cast<void**>(&pEnumerator)
+    );
+    if (FAILED(hr) || !pEnumerator) {
+        return -1;
+    }
+
+    // Get default capture (microphone) device
+    IMMDevice* pDevice = nullptr;
+    hr = pEnumerator->GetDefaultAudioEndpoint(eCapture, eConsole, &pDevice);
+    if (FAILED(hr) || !pDevice) {
+        pEnumerator->Release();
+        return 0;  // No mic device, return empty
+    }
+
+    // Activate session manager
+    IAudioSessionManager2* pSessionManager = nullptr;
+    hr = pDevice->Activate(
+        __uuidof(IAudioSessionManager2),
+        CLSCTX_ALL,
+        nullptr,
+        reinterpret_cast<void**>(&pSessionManager)
+    );
+    if (FAILED(hr) || !pSessionManager) {
+        pDevice->Release();
+        pEnumerator->Release();
+        return -1;
+    }
+
+    // Get session enumerator
+    IAudioSessionEnumerator* pSessionEnum = nullptr;
+    hr = pSessionManager->GetSessionEnumerator(&pSessionEnum);
+    if (FAILED(hr) || !pSessionEnum) {
+        pSessionManager->Release();
+        pDevice->Release();
+        pEnumerator->Release();
+        return -1;
+    }
+
+    // Get session count
+    int sessionCount = 0;
+    hr = pSessionEnum->GetCount(&sessionCount);
+    if (FAILED(hr) || sessionCount == 0) {
+        pSessionEnum->Release();
+        pSessionManager->Release();
+        pDevice->Release();
+        pEnumerator->Release();
+        return 0;
+    }
+
+    // Collect active sessions
+    std::vector<DWORD> activePids;
+    std::vector<std::wstring> activeNames;
+
+    for (int i = 0; i < sessionCount; i++) {
+        IAudioSessionControl* pSessionControl = nullptr;
+        hr = pSessionEnum->GetSession(i, &pSessionControl);
+        if (FAILED(hr) || !pSessionControl) continue;
+
+        // Check if session is active
+        AudioSessionState state;
+        hr = pSessionControl->GetState(&state);
+        if (FAILED(hr) || state != AudioSessionStateActive) {
+            pSessionControl->Release();
+            continue;
+        }
+
+        // Get IAudioSessionControl2 for process info
+        IAudioSessionControl2* pSessionControl2 = nullptr;
+        hr = pSessionControl->QueryInterface(
+            __uuidof(IAudioSessionControl2),
+            reinterpret_cast<void**>(&pSessionControl2)
+        );
+        if (FAILED(hr) || !pSessionControl2) {
+            pSessionControl->Release();
+            continue;
+        }
+
+        // Skip system sounds
+        hr = pSessionControl2->IsSystemSoundsSession();
+        if (hr == S_OK) {
+            pSessionControl2->Release();
+            pSessionControl->Release();
+            continue;
+        }
+
+        // Get process ID
+        DWORD pid = 0;
+        hr = pSessionControl2->GetProcessId(&pid);
+        if (FAILED(hr) || pid == 0) {
+            // AUDCLNT_S_NO_SINGLE_PROCESS means multi-process session - skip
+            pSessionControl2->Release();
+            pSessionControl->Release();
+            continue;
+        }
+
+        // Avoid duplicates
+        bool duplicate = false;
+        for (DWORD existingPid : activePids) {
+            if (existingPid == pid) {
+                duplicate = true;
+                break;
+            }
+        }
+        if (duplicate) {
+            pSessionControl2->Release();
+            pSessionControl->Release();
+            continue;
+        }
+
+        // Get process name
+        std::wstring procName = GetProcessNameFromPid(pid);
+        if (procName.empty()) {
+            procName = L"Unknown";
+        }
+
+        activePids.push_back(pid);
+        activeNames.push_back(procName);
+
+        pSessionControl2->Release();
+        pSessionControl->Release();
+    }
+
+    // Cleanup COM objects
+    pSessionEnum->Release();
+    pSessionManager->Release();
+    pDevice->Release();
+    pEnumerator->Release();
+
+    // Allocate output arrays
+    if (activePids.empty()) return 0;
+
+    size_t n = activePids.size();
+    *pids = static_cast<int32_t*>(malloc(n * sizeof(int32_t)));
+    *names = static_cast<char**>(malloc(n * sizeof(char*)));
+    *bundleIds = static_cast<char**>(malloc(n * sizeof(char*)));
+
+    if (!*pids || !*names || !*bundleIds) {
+        free(*pids);
+        free(*names);
+        free(*bundleIds);
+        *pids = nullptr;
+        *names = nullptr;
+        *bundleIds = nullptr;
+        return -1;
+    }
+
+    for (size_t i = 0; i < n; i++) {
+        (*pids)[i] = static_cast<int32_t>(activePids[i]);
+
+        // Convert wide string to UTF-8
+        int utf8Len = WideCharToMultiByte(CP_UTF8, 0, activeNames[i].c_str(), -1, nullptr, 0, nullptr, nullptr);
+        (*names)[i] = static_cast<char*>(malloc(utf8Len));
+        if ((*names)[i]) {
+            WideCharToMultiByte(CP_UTF8, 0, activeNames[i].c_str(), -1, (*names)[i], utf8Len, nullptr, nullptr);
+        }
+
+        // Windows doesn't have bundle IDs - use empty string
+        (*bundleIds)[i] = _strdup("");
+    }
+
+    *count = static_cast<int32_t>(n);
+    return 0;
+}
+
+void mic_activity_free_processes(
+    int32_t* pids,
+    char** names,
+    char** bundleIds,
+    int32_t count
+) {
+    if (pids) free(pids);
+    
+    if (names) {
+        for (int32_t i = 0; i < count; i++) {
+            if (names[i]) free(names[i]);
+        }
+        free(names);
+    }
+    
+    if (bundleIds) {
+        for (int32_t i = 0; i < count; i++) {
+            if (bundleIds[i]) free(bundleIds[i]);
+        }
+        free(bundleIds);
+    }
 }
 
 }  // extern "C"
