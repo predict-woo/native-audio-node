@@ -1,6 +1,6 @@
 {
   "name": "@native-audio-node/win32-x64",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Native audio capture binary for Windows x64",
   "license": "MIT",
   "author": "",
